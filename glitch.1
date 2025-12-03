@@ -1,0 +1,57 @@
+.TH GLITCH 1 "February 2026" "glitch 1.4" "User Commands"
+.SH NAME
+glitch \- animated vaporwave system information
+.SH SYNOPSIS
+.B glitch
+.RI [ --once ]
+.RI [ --speed ms ]
+.RI [ --duration ms ]
+.br
+.B glitch gen-pass
+.RI [ len ]
+.br
+.B glitch gen-keyfile
+.RI [ bytes ]
+.br
+.B glitch entropy
+.RI [ bytes ]
+.br
+.B glitch entropy-cache
+.RI [ bytes ]
+.SH DESCRIPTION
+glitch displays animated vaporwave\-styled system information.
+.SH OPTIONS
+--once : show only one frame
+.br
+--speed ms : set frame delay
+.br
+--duration ms : set total runtime (0 disables cap)
+.SH ENVIRONMENT
+GLITCH_SPEED : frame delay in ms
+.br
+GLITCH_DURATION_MS : total runtime in ms
+.br
+GLITCH_VARIANT / GLITCH_NOISE : lock image/noise mode
+.br
+GLITCH_VARIANT_DIR / LOCAL_IMAGES_DIR : custom variant directory
+.br
+GLITCH_DEBUG : emit palette debug logs
+.br
+COLOR_CONFIG : override path for color.config
+.SH FILES
+~/.config/glitch/shape.config  
+~/.config/glitch/color.config  
+~/.config/glitch/glitch.config  
+~/.config/glitch/entropy.bin  
+.SH CONFIG
+glitch.config keys:
+.br
+NET_IMAGES, FETCH_SOURCE, FETCH_COUNT, FETCH_MAX, LOCAL_IMAGES_DIR, COLOR_CONFIG (path to color.config), STATS (comma list).
+.br
+color.config: hex keys BG1..BG4, FG_DIS/FG_KER/FG_UPT/FG_MEM/FG_PIPE, optional PRIMARY note.
+.SH BUILD MODES
+make lean    : add native-tuned flags and strip symbols.
+.br
+make minimal : text-only build, disables curl fetch and kitty images.
+.SH AUTHOR
+nate makes wares · nateolson.io

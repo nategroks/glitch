@@ -1,0 +1,14 @@
+#
+# Sample color config for glitch (hex RGB). Any missing key falls back to the sampled palette.
+#
+BG1=#0f0f0f
+BG2=#1b1b1b
+BG3=#2a2a2a
+BG4=#404040
+FG_DIS=#e3d7c1
+FG_KER=#e3d7c1
+FG_UPT=#e3d7c1
+FG_MEM=#e3d7c1
+FG_PIPE=#c0b090
+# PRIMARY is optional, for your own reference
+PRIMARY=#ff9900
