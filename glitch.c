@@ -960,25 +960,72 @@ fetch_one_image(const AppConfig *cfg, const char *dir)
 }
 
 static void
-run_fetcher(const AppConfig *cfg)
+variant_dir_stats(const char *dir, int *png_count, time_t *latest_mtime)
+{
+        struct dirent *ent;
+        struct stat st;
+        char full[1024];
+        int count = 0;
+        time_t newest = 0;
+        DIR *d;
+
+        if (!dir)
+                goto out;
+        d = opendir(dir);
+        if (!d)
+                goto out;
+        while ((ent = readdir(d)) != NULL) {
+                size_t len = strlen(ent->d_name);
+                if (len < 5 || strcmp(ent->d_name + len - 4, ".png") != 0)
+                        continue;
+                snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name);
+                if (stat(full, &st) != 0)
+                        continue;
+                if (st.st_mtime > newest)
+                        newest = st.st_mtime;
+                count++;
+        }
+        closedir(d);
+out:
+        if (png_count)
+                *png_count = count;
+        if (latest_mtime)
+                *latest_mtime = newest;
+}
+
+static void
+run_fetcher(const AppConfig *cfg, int force_fetch)
 {
 #ifdef MINIMAL_BUILD
-	(void)cfg;
-	return;
+        (void)cfg;
+        (void)force_fetch;
+        return;
 #else
-	char dir_buf[512];
-	const char *dir;
-	int i;
+        char dir_buf[512];
+        const char *dir;
+        int i, existing = 0;
+        time_t newest = 0;
 
-	if (!cfg || !cfg->net_images)
-		return;
-	dir = default_variant_dir(dir_buf, sizeof(dir_buf));
-	if (!dir)
-		return;
-	ensure_dir(dir);
-	for (i = 0; i < cfg->fetch_count; ++i)
-		fetch_one_image(cfg, dir);
-	prune_variants_dir(dir, cfg->fetch_max);
+        if (!cfg || !cfg->net_images)
+                return;
+        dir = default_variant_dir(dir_buf, sizeof(dir_buf));
+        if (!dir)
+                return;
+
+        ensure_dir(dir);
+        variant_dir_stats(dir, &existing, &newest);
+        if (!force_fetch && existing >= cfg->fetch_count) {
+                time_t now = time(NULL);
+                double age = difftime(now, newest);
+                if (age >= 0 && age < 6 * 3600) { /* refresh at most every 6h */
+                        prune_variants_dir(dir, cfg->fetch_max);
+                        return;
+                }
+        }
+
+        for (i = 0; i < cfg->fetch_count; ++i)
+                fetch_one_image(cfg, dir);
+        prune_variants_dir(dir, cfg->fetch_max);
 #endif
 }
 
@@ -2099,16 +2146,18 @@ static void print_entropy_footer(int img_gap) {
 
     char suffix[64];
     (void)eta_sec;
-    snprintf(suffix, sizeof(suffix), " %3d%%", percent);
+    snprintf(suffix, sizeof(suffix), "%3d%%", percent);
     int suffix_len = (int)strlen(suffix);
 
     /* keep headroom so the bar doesn't wrap */
     int prefix = 1 + label_len + sep_spaces + 3; /* space + label + sep + "|_ " */
     int available = cols - pad - prefix - 2 - suffix_len; /* minus [] and suffix */
     if (available < 6) return;
-    int bar_cells = available / 6; /* shorten further */
-    if (bar_cells < 6) bar_cells = available < 6 ? available : 6;
-    if (bar_cells > available) bar_cells = available;
+    const int cell_width = 3;
+    int bar_cells = available / (cell_width * 2); /* keep the bar about half size */
+    if (bar_cells < 4) bar_cells = available / cell_width;
+    if (bar_cells < 4) bar_cells = 4;
+    if (bar_cells * cell_width > available) bar_cells = available / cell_width;
 
     int filled = (int)(pct * (double)bar_cells + 0.5);
     if (filled > bar_cells) filled = bar_cells;
@@ -2632,7 +2681,7 @@ int main(int argc, char **argv) {
                 duration_ms = (unsigned long)ms;
             }
         } else if (strcmp(argv[i], "--fetch") == 0 || strcmp(argv[i], "--fetch-only") == 0) {
-            run_fetcher(&cfg);
+            run_fetcher(&cfg, 1);
             if (strcmp(argv[i], "--fetch-only") == 0) {
                 printf("[+] fetched variants\n");
                 return 0;
@@ -2648,7 +2697,7 @@ int main(int argc, char **argv) {
     }
 
     /* refresh variants if enabled */
-    run_fetcher(&cfg);
+    run_fetcher(&cfg, 0);
 
     /* Resolve image path (optional) */
     char img_buf[1024];
