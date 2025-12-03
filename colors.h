@@ -7,15 +7,15 @@
 
 #define F_RESET   CSI "0m"
 
-#define BG1       CSI "48;2;26;22;23m"
-#define BG2       CSI "48;2;52;58;48m"
-#define BG3       CSI "48;2;75;76;68m"
-#define BG4       CSI "48;2;215;202;168m"
+#define BG1       CSI "48;2;48;48;48m"
+#define BG2       CSI "48;2;65;65;65m"
+#define BG3       CSI "48;2;78;82;84m"
+#define BG4       CSI "48;2;107;116;113m"
 
-#define FG_DIS    CSI "38;2;129;127;127m"
-#define FG_KER    CSI "38;2;143;147;141m"
-#define FG_UPT    CSI "38;2;156;157;152m"
-#define FG_MEM    CSI "38;2;140;131;109m"
-#define FG_PIPE   CSI "38;2;129;127;127m"
+#define FG_DIS    CSI "38;2;141;141;141m"
+#define FG_KER    CSI "38;2;150;150;150m"
+#define FG_UPT    CSI "38;2;158;160;161m"
+#define FG_MEM    CSI "38;2;174;179;177m"
+#define FG_PIPE   CSI "38;2;141;141;141m"
 
 #endif

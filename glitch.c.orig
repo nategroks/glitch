@@ -2153,16 +2153,11 @@ static void print_entropy_footer(int img_gap) {
     int prefix = 1 + label_len + sep_spaces + 3; /* space + label + sep + "|_ " */
     int available = cols - pad - prefix - 2 - suffix_len; /* minus [] and suffix */
     if (available < 6) return;
-    const int cell_width = 2;
-    const int max_bar_cells = 16;
-    int available_for_bar = available / 3; /* keep the bar compact so the suffix stays close */
-    int bar_cells = available_for_bar / cell_width;
+    const int cell_width = 3;
+    int bar_cells = available / (cell_width * 2); /* keep the bar about half size */
+    if (bar_cells < 4) bar_cells = available / cell_width;
     if (bar_cells < 4) bar_cells = 4;
-    if (bar_cells > max_bar_cells) bar_cells = max_bar_cells;
-    if (bar_cells * cell_width > available) {
-        bar_cells = available / cell_width;
-        if (bar_cells < 1) bar_cells = 1;
-    }
+    if (bar_cells * cell_width > available) bar_cells = available / cell_width;
 
     int filled = (int)(pct * (double)bar_cells + 0.5);
     if (filled > bar_cells) filled = bar_cells;
@@ -2194,9 +2189,9 @@ static void print_entropy_footer(int img_gap) {
             if ((!cfg || !*cfg) && bar_color_fg[0]) cfg = bar_color_fg;
             if (cbg && *cbg) printf("%s", cbg);
             if (cfg && *cfg) printf("%s", cfg);
-            printf("\033[2m█\033[0m "); /* dim block, keep spacing */
+            printf("\033[2m█\033[0m  "); /* dim block, keep spacing */
         } else {
-            printf("  ");       /* match cell width when empty */
+            printf("   ");       /* match cell width when empty */
         }
     }
     printf(F_RESET "\033[2m]\033[0m \033[2m%s\033[0m\n", suffix);
