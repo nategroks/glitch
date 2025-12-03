@@ -1,7 +1,7 @@
 CC=cc
 CFLAGS?=-O2 -Wall
 LDFLAGS?=
-LIBS=-lcurl
+LIBS=-lpng -lz -lcurl
 
 .PHONY: glitch clean install
 
@@ -18,7 +18,7 @@ lean: LDFLAGS+=-s
 lean: glitch
 
 minimal: CFLAGS+=-DMINIMAL_BUILD -Wall
-minimal: LIBS=
+minimal: LIBS=-lpng -lz
 minimal: glitch
 
 clean:
