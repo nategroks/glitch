@@ -78,7 +78,14 @@
 #define MASK_PILL     21
 #define MASK_STAIRS_UP 22
 #define MASK_STAIRS_DOWN 23
-#define MASK_COUNT    24
+#define MASK_CROSS    24
+#define MASK_HASH     25
+#define MASK_JELLY    26
+#define MASK_SPIRAL_SHELL 27
+#define MASK_SWORD    28
+#define MASK_XMARK    29
+#define MASK_DOLLAR   30
+#define MASK_COUNT    31
 
 #define COLOR_CODE_LEN 32
 
@@ -1417,6 +1424,142 @@ static const NoiseSet noise_sets[] = {
         }
     },
 
+    /* --------- VAPORWAVE SHAPES --------- */
+
+    /* sunset – stratified sun with horizon scanlines */
+    {
+        "sunset",
+        "=:~",
+        {
+            "    ==      ",
+            "  ======    ",
+            " ========   ",
+            "~==~==~==~  "
+        }
+    },
+
+    /* palm – palm tree silhouette */
+    {
+        "palm",
+        "/\\\\|",
+        {
+            "     |      ",
+            "  /\\ | /\\   ",
+            "   |||/|    ",
+            "    ||      "
+        }
+    },
+
+    /* gridwave – perspective synth grid */
+    {
+        "gridwave",
+        "/_\\",
+        {
+            " /\\/\\/\\/\\   ",
+            "  /_/\\_/_/  ",
+            "   /_/\\_/   ",
+            "    // //   "
+        }
+    },
+
+    /* --------- SYMBOLIC SHAPES --------- */
+
+    /* xmark – bold X */
+    {
+        "xmark",
+        "Xx",
+        {
+            "X   /\\   X  ",
+            " \\ /  \\ /   ",
+            "  X    X    ",
+            " X   \\/   X "
+        }
+    },
+
+    /* hash – stacked # blocks */
+    {
+        "hash",
+        "#",
+        {
+            " ## ## ##   ",
+            " #########  ",
+            " ## ## ##   ",
+            " ## ## ##   "
+        }
+    },
+
+    /* dollar – simple $ glyph */
+    {
+        "dollar",
+        "$S",
+        {
+            "    $$      ",
+            "  $$ $$     ",
+            "    $$      ",
+            "  $$ $$     "
+        }
+    },
+
+    /* jelly – tiny jellyfish */
+    {
+        "jelly",
+        "~|/",
+        {
+            "    ()      ",
+            "   (~~)     ",
+            "  (~~~~)    ",
+            "   /||\\     "
+        }
+    },
+
+    /* spiral – tight coil */
+    {
+        "spiral",
+        "@o",
+        {
+            "    @@@@    ",
+            "  @   @     ",
+            "   @@@  @   ",
+            "    @@@@    "
+        }
+    },
+
+    /* diamond – lozenge */
+    {
+        "diamond",
+        "<>/\\",
+        {
+            "    /\\      ",
+            "   <  >     ",
+            "    \\/      ",
+            "    <>      "
+        }
+    },
+
+    /* sword – blade icon */
+    {
+        "sword",
+        "/|^",
+        {
+            "     ^      ",
+            "     |      ",
+            "    /|\\     ",
+            "    / \\     "
+        }
+    },
+
+    /* crosshair – bold cross variant */
+    {
+        "crosshair",
+        "+X",
+        {
+            "     ++     ",
+            "  ++++++++  ",
+            "     ++     ",
+            "     ++     "
+        }
+    },
+
     /* --------- VEIN / SLASH FAMILY --------- */
 
     /* veil – hanging veins / threads */
@@ -1939,6 +2082,19 @@ static void init_mask_shape(void) {
     g_mask_shape = rng_range(MASK_COUNT); /* rotate polygon per run */
 }
 
+static int mask_for_noise(const char *name) {
+    if (!name) return -1;
+    if (strcmp(name, "jelly") == 0) return MASK_JELLY;
+    if (strcmp(name, "hash") == 0) return MASK_HASH;
+    if (strcmp(name, "xmark") == 0) return MASK_XMARK;
+    if (strcmp(name, "dollar") == 0) return MASK_DOLLAR;
+    if (strcmp(name, "spiral") == 0) return MASK_SPIRAL_SHELL;
+    if (strcmp(name, "diamond") == 0) return MASK_DIAMOND;
+    if (strcmp(name, "sword") == 0) return MASK_SWORD;
+    if (strcmp(name, "crosshair") == 0) return MASK_CROSS;
+    return -1;
+}
+
 static void set_default_config(AppConfig *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->net_images = 1;
@@ -2083,23 +2239,36 @@ static int select_variant_image(int noise_locked, char *img_buf, size_t buf_size
 
 static void init_noise_mode(void) {
     const char *mode = getenv("GLITCH_NOISE");
+    active_noise = NULL;
 
     if (!mode || !*mode) {
         const NoiseSet *pick = pick_noise_by_hash(NULL);
-        active_noise = pick ? pick : &noise_sets[0];
-        return;
-    }
+        active_noise = pick;
+    } else {
+        for (int i = 0; noise_sets[i].name != NULL; ++i) {
+            if (strcmp(mode, noise_sets[i].name) == 0) {
+                active_noise = &noise_sets[i];
+                break;
+            }
+        }
 
-    for (int i = 0; noise_sets[i].name != NULL; ++i) {
-        if (strcmp(mode, noise_sets[i].name) == 0) {
-            active_noise = &noise_sets[i];
-            return;
+        if (!active_noise) {
+            /* unknown mode -> deterministic pick from the catalogue */
+            const NoiseSet *pick = pick_noise_by_hash(mode);
+            active_noise = pick;
         }
     }
 
-    /* unknown mode -> deterministic pick from the catalogue */
-    const NoiseSet *pick = pick_noise_by_hash(mode);
-    active_noise = pick ? pick : &noise_sets[0];
+    if (!active_noise) {
+        active_noise = &noise_sets[0];
+    }
+
+    int mask = mask_for_noise(active_noise->name);
+    if (mask >= 0) {
+        g_mask_shape = mask;
+    } else {
+        init_mask_shape();       /* random polygonal mask each run */
+    }
 }
 
 static void init_symbol(void) {
@@ -2266,9 +2435,14 @@ static void fill_noise_row(int line, char *out, int width) {
         }
     } else {
         /* Normal mode: template + light random jitter */
+        int jitter_pct = JITTER_PCT;
+        if (tmpl) {
+            jitter_pct = JITTER_PCT / 4; /* keep symbol recognizable */
+            if (jitter_pct < 1) jitter_pct = 1;
+        }
         for (int i = 0; i < width; ++i) {
             if (out[i] == ' ') continue;
-            if ((rng_range(100)) < JITTER_PCT && charset_len > 0) {
+            if ((rng_range(100)) < jitter_pct && charset_len > 0) {
                 out[i] = chars[rng_range(charset_len)];
             }
         }
@@ -2397,6 +2571,71 @@ static int mask_inside(int shape, int x, int y, int width, int total_rows) {
             double step = (double)(total_rows - 1 - y) / (double)(total_rows - 1);
             double limit = step * (double)(width);
             return x <= limit;
+        }
+        case MASK_CROSS: {
+            double t = 0.18 * (a < b ? a : b);
+            return (adx <= t) || (ady <= t);
+        }
+        case MASK_HASH: {
+            double t = 0.12 * (a < b ? a : b);
+            double xn = dx / a;
+            double yn = dy / b;
+            int vertical = (fabs(xn - 0.45) <= t / a) || (fabs(xn + 0.45) <= t / a);
+            int horizontal = (fabs(yn - 0.45) <= t / b) || (fabs(yn + 0.45) <= t / b);
+            return vertical || horizontal;
+        }
+        case MASK_JELLY: {
+            double xn = dx / a;
+            double yn = dy / b;
+            /* Dome */
+            if (yn < -0.1) {
+                double dome = (xn * xn) + ((yn + 0.3) * (yn + 0.3) * 1.2);
+                return dome <= 0.9;
+            }
+            /* Tentacles */
+            if (yn <= 1.0) {
+                double stripes[] = { -0.45, -0.2, 0.0, 0.2, 0.45 };
+                double spread = 0.12;
+                for (int i = 0; i < 5; ++i) {
+                    if (fabs(xn - stripes[i]) <= spread) return 1;
+                }
+            }
+            return 0;
+        }
+        case MASK_SPIRAL_SHELL: {
+            double xn = dx / a;
+            double yn = dy / b;
+            double r = sqrt(xn * xn + yn * yn);
+            if (r > 1.0) return 0;
+            double angle = atan2(yn, xn);
+            double two_pi = 6.28318530717958647692;
+            if (angle < 0) angle += two_pi;
+            double turns = angle / two_pi;
+            double target = 0.15 + 0.65 * turns;
+            double band = fabs(r - target);
+            return (band <= 0.18) || (r <= 0.18);
+        }
+        case MASK_SWORD: {
+            double xn = dx / a;
+            double yn = dy / b;
+            double blade = (fabs(xn) <= 0.18) && (yn <= 0.9) && (yn >= -0.9);
+            double guard = (yn >= -0.05 && yn <= 0.1 && fabs(xn) <= 0.65);
+            double pommel = (yn >= 0.7 && fabs(xn) <= 0.25);
+            return blade || guard || pommel;
+        }
+        case MASK_XMARK: {
+            double xn = dx / a;
+            double yn = dy / b;
+            double t = 0.18;
+            return (fabs(yn - xn) <= t) || (fabs(yn + xn) <= t);
+        }
+        case MASK_DOLLAR: {
+            double xn = dx / a;
+            double yn = dy / b;
+            double spine = fabs(xn) <= 0.18;
+            double top = (xn * xn + (yn - 0.35) * (yn - 0.35)) <= 0.28;
+            double bottom = (xn * xn + (yn + 0.35) * (yn + 0.35)) <= 0.28;
+            return spine || top || bottom;
         }
         default:
             return 1;

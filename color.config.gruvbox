@@ -1,0 +1,13 @@
+# color.config - Gruvbox dark palette
+# Copy to ~/.config/glitch/color.config to apply.
+
+BG1=#282828
+BG2=#32302f
+BG3=#3c3836
+BG4=#504945
+
+FG_DIS=#fbf1c7
+FG_KER=#d79921
+FG_UPT=#b8bb26
+FG_MEM=#83a598
+FG_PIPE=#fe8019

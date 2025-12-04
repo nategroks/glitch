@@ -1,0 +1,13 @@
+# color.config - High contrast palette
+# Copy to ~/.config/glitch/color.config to apply.
+
+BG1=#000000
+BG2=#111111
+BG3=#222222
+BG4=#eeeeee
+
+FG_DIS=#ffffff
+FG_KER=#ff3b30
+FG_UPT=#00d7ff
+FG_MEM=#00ff5f
+FG_PIPE=#ffff00

@@ -8,21 +8,86 @@ VARIANT_DIR="$CONFIG_DIR/variants"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 write_default_color_config() {
-  cat > "$COLOR_CFG" <<'EOF'
+  local palette="${1:-${GLITCH_PALETTE:-${PALETTE:-miami}}}"
+  local palette_label
+  local bg1 bg2 bg3 bg4 fg_dis fg_ker fg_upt fg_mem fg_pipe
+  local presets=(miami sunset neon)
+
+  if [ "$palette" = "random" ]; then
+    palette=${presets[$((RANDOM % ${#presets[@]}))]}
+  fi
+
+  case "$palette" in
+    miami)
+      palette="miami"
+      palette_label="miami-neon"
+      bg1="#0a0f2d"
+      bg2="#251b4b"
+      bg3="#7d2ff7"
+      bg4="#f78fb3"
+      fg_dis="#8ce9ff"
+      fg_ker="#ff7edb"
+      fg_upt="#ffd8ff"
+      fg_mem="#ffd6a5"
+      fg_pipe="#b3f4ff"
+      ;;
+    sunset)
+      palette="sunset"
+      palette_label="sunset-grid"
+      bg1="#150915"
+      bg2="#331437"
+      bg3="#ff3fa4"
+      bg4="#ffc387"
+      fg_dis="#ffe6ff"
+      fg_ker="#ff94c2"
+      fg_upt="#ffd7b4"
+      fg_mem="#f2c7ff"
+      fg_pipe="#fff2d9"
+      ;;
+    neon|coast|aqua)
+      palette="neon"
+      palette_label="neon-coast"
+      bg1="#0a1020"
+      bg2="#0e2848"
+      bg3="#1e6f9f"
+      bg4="#b9f3ff"
+      fg_dis="#d7e9ff"
+      fg_ker="#ff9dee"
+      fg_upt="#8ee3ff"
+      fg_mem="#ffe3ff"
+      fg_pipe="#c8f7ff"
+      ;;
+    *)
+      palette="miami"
+      palette_label="miami-neon"
+      bg1="#0a0f2d"
+      bg2="#251b4b"
+      bg3="#7d2ff7"
+      bg4="#f78fb3"
+      fg_dis="#8ce9ff"
+      fg_ker="#ff7edb"
+      fg_upt="#ffd8ff"
+      fg_mem="#ffd6a5"
+      fg_pipe="#b3f4ff"
+      ;;
+  esac
+
+  cat > "$COLOR_CFG" <<EOF
 # ~/.config/glitch/color.config
+# Baked-in palette: $palette_label (GLITCH_PALETTE=miami|sunset|neon|random)
 
-BG1=#1d1618
-BG2=#57172a
-BG3=#a65266
-BG4=#c05163
+BG1=$bg1
+BG2=$bg2
+BG3=$bg3
+BG4=$bg4
 
-# Foreground accents tuned to the default jelly.png center art.
-FG_DIS=#f8d8d5
-FG_KER=#ef9fa5
-FG_UPT=#d85f6c
-FG_MEM=#a65266
-FG_PIPE=#f8d8d5
+FG_DIS=$fg_dis
+FG_KER=$fg_ker
+FG_UPT=$fg_upt
+FG_MEM=$fg_mem
+FG_PIPE=$fg_pipe
 EOF
+  echo "[+] Wrote $COLOR_CFG using palette: $palette_label"
 }
 
 collect_image_paths() {
@@ -220,30 +285,36 @@ if ! ls "$VARIANT_DIR"/*.png >/dev/null 2>&1; then
   fi
 fi
 
-mapfile -t IMAGE_SOURCES < <(collect_image_paths)
-if [ ${#IMAGE_SOURCES[@]} -gt 0 ]; then
-  # If no variant/noise is locked, rotate the list so we pick a random primary image each run.
-  if [ -z "$GLITCH_NOISE" ] && [ -z "$GLITCH_VARIANT" ] && [ ${#IMAGE_SOURCES[@]} -gt 1 ]; then
-    idx=$((RANDOM % ${#IMAGE_SOURCES[@]}))
-    primary=${IMAGE_SOURCES[$idx]}
-    reordered=("$primary")
-    for i in "${!IMAGE_SOURCES[@]}"; do
-      if [ "$i" -ne "$idx" ]; then
-        reordered+=("${IMAGE_SOURCES[$i]}")
-      fi
-    done
-    IMAGE_SOURCES=("${reordered[@]}")
-  fi
+palette_hint="${GLITCH_PALETTE:-${PALETTE:-}}"
+if [ -n "$palette_hint" ] && [ "$palette_hint" != "auto" ]; then
+  echo "[*] Using baked-in palette '$palette_hint' (set GLITCH_PALETTE=auto to sample images)."
+  write_default_color_config "$palette_hint"
+else
+  mapfile -t IMAGE_SOURCES < <(collect_image_paths)
+  if [ ${#IMAGE_SOURCES[@]} -gt 0 ]; then
+    # If no variant/noise is locked, rotate the list so we pick a random primary image each run.
+    if [ -z "$GLITCH_NOISE" ] && [ -z "$GLITCH_VARIANT" ] && [ ${#IMAGE_SOURCES[@]} -gt 1 ]; then
+      idx=$((RANDOM % ${#IMAGE_SOURCES[@]}))
+      primary=${IMAGE_SOURCES[$idx]}
+      reordered=("$primary")
+      for i in "${!IMAGE_SOURCES[@]}"; do
+        if [ "$i" -ne "$idx" ]; then
+          reordered+=("${IMAGE_SOURCES[$i]}")
+        fi
+      done
+      IMAGE_SOURCES=("${reordered[@]}")
+    fi
 
-  if write_palette_from_image "${IMAGE_SOURCES[@]}"; then
-    echo "[+] Generated $COLOR_CFG from ${#IMAGE_SOURCES[@]} image(s); primary: ${IMAGE_SOURCES[0]}"
+    if write_palette_from_image "${IMAGE_SOURCES[@]}"; then
+      echo "[+] Generated $COLOR_CFG from ${#IMAGE_SOURCES[@]} image(s); primary: ${IMAGE_SOURCES[0]}"
+    else
+      echo "[!] Could not sample images from $VARIANT_DIR; falling back to baked-in palette."
+      write_default_color_config
+    fi
   else
-    echo "[!] Could not sample images from $VARIANT_DIR; falling back to baked-in palette."
+    echo "[!] No images in $VARIANT_DIR; falling back to baked-in palette."
     write_default_color_config
   fi
-else
-  echo "[!] No images in $VARIANT_DIR; falling back to baked-in palette."
-  write_default_color_config
 fi
 
 # 2. Load config values

@@ -1,0 +1,36 @@
+glitch quickstart
+=================
+
+1) Install/build once
+- Prereqs: `cc`, `make`, `libpng`, `zlib`, `curl` (skip curl for minimal). Optional: Python 3 + Pillow if you want auto palette sampling from images.
+- From the repo root: `./install.sh`
+  - Creates `~/.config/glitch/` with `glitch.config`, `color.config`, `shape.config`, and `variants/`.
+  - Builds the binary and installs the man page.
+  - If Python is missing, it will fall back to a baked palette; you can swap in a template below.
+- Add the binary to PATH if needed: `./path.sh && source ~/.bashrc`
+
+2) Add your own pictures (Kitty overlays / palette sampling)
+- Drop square PNGs into `~/.config/glitch/variants/`. Name them after a noise mode (e.g., `sunset.png`, `sword.png`, `storm.png`). The name drives both the overlay and `GLITCH_NOISE`.
+- To force a specific image/noise: `GLITCH_VARIANT=sunset ./glitch` (also sets `GLITCH_NOISE=sunset`).
+- To keep your own directory separate, set `LOCAL_IMAGES_DIR=/path/to/your/pngs` inside `~/.config/glitch/glitch.config` (or export `GLITCH_VARIANT_DIR`), then rerun `./install.sh`.
+
+3) Apply your own hex palette
+- Edit `~/.config/glitch/color.config` directly (keys: BG1..BG4, FG_DIS, FG_KER, FG_UPT, FG_MEM, FG_PIPE), then rerun `./install.sh` to regenerate `colors.h`.
+- Use a template from the repo root:
+  - Nord: `cp color.config.nord ~/.config/glitch/color.config`
+  - Dracula: `cp color.config.dracula ~/.config/glitch/color.config`
+  - High contrast: `cp color.config.high-contrast ~/.config/glitch/color.config`
+  - Gruvbox: `cp color.config.gruvbox ~/.config/glitch/color.config`
+  - Grayscale: `cp color.config.grayscale ~/.config/glitch/color.config`
+  - After copying, run `./install.sh` to rebuild with that palette.
+- Alternately, bake in a palette without Python by setting `GLITCH_PALETTE=miami|sunset|neon|random` before `./install.sh`.
+
+4) Turn off web downloads for PNGs
+- Set `NET_IMAGES=0` in `~/.config/glitch/glitch.config` (or export `NET_IMAGES=0`) to disable all network fetching.
+- For a text-only build, use `make minimal` (or run `./install.sh` after setting `NET_IMAGES=0` to keep configs in sync).
+
+5) Run
+- Default: `./glitch`
+- Single frame: `./glitch --once`
+- Lock a shape/noise: `GLITCH_NOISE=diamond ./glitch`
+- Speed/duration: `GLITCH_SPEED=120 GLITCH_DURATION_MS=4000 ./glitch`

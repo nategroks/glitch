@@ -1,0 +1,13 @@
+# color.config - Dracula palette
+# Copy to ~/.config/glitch/color.config to apply.
+
+BG1=#1b1c26
+BG2=#282a36
+BG3=#343746
+BG4=#44475a
+
+FG_DIS=#bd93f9
+FG_KER=#ff79c6
+FG_UPT=#8be9fd
+FG_MEM=#f8f8f2
+FG_PIPE=#f1fa8c

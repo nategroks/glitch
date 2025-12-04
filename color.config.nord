@@ -1,0 +1,13 @@
+# color.config - Nord palette
+# Copy to ~/.config/glitch/color.config to apply.
+
+BG1=#2e3440
+BG2=#3b4252
+BG3=#434c5e
+BG4=#4c566a
+
+FG_DIS=#e5e9f0
+FG_KER=#88c0d0
+FG_UPT=#a3be8c
+FG_MEM=#d8dee9
+FG_PIPE=#8fbcbb

@@ -1,0 +1,13 @@
+# color.config - Grayscale palette
+# Copy to ~/.config/glitch/color.config to apply.
+
+BG1=#0a0a0a
+BG2=#1a1a1a
+BG3=#2a2a2a
+BG4=#dcdcdc
+
+FG_DIS=#f0f0f0
+FG_KER=#c0c0c0
+FG_UPT=#a0a0a0
+FG_MEM=#808080
+FG_PIPE=#ffffff
