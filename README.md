@@ -4,6 +4,9 @@
 
 Animated vaporwave system info with procedurally jittered ASCII, optional Kitty PNG overlays, and handy entropy tools for encryption workflows. Built to pop open in your shell with almost no footprint, `glitch` is a suckless-inspired fetch that keeps deps to a minimum while still flexing modern crypto tooling.
 
+## Screenshot
+![glitch terminal demo](./demo.png)
+
 ## Highlights
 - This is an awesome terminal fetch application that is rendered with dozens of noise modes (signal, ritual, crown, chill, slashfall, lattice, storm, sunset, palm, gridwave, xmark, hash, dollar, jelly, spiral, diamond, sword, crosshair, etc.) plus optional Kitty image overlay per run, yet it cold-starts in milliseconds and runs happily on minimal resources.
 - Configurable stats panel (distro, kernel, uptime, mem, host, user, shell, cpu, ip, disk, ports, entropy) with animated entropy progress bar.
