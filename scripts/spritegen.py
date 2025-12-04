@@ -11,7 +11,7 @@ Usage:
   python3 spritegen.py input.png shape_name > shape.h
 
 Then run:
-  ./install.sh
+  ./scripts/install.sh
   ./glitch
 """
 

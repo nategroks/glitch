@@ -37,7 +37,7 @@
 
 #define FRAMES         1
 #define LINES          10
-#define MAX_STATS      10
+#define MAX_STATS      14
 #define SHAPE_COLS     12   /* left glyph field */
 #define JITTER_PCT     20
 #define FRAME_TOP_ROW  1    /* first content row (1-based) after leading newline */
@@ -96,6 +96,9 @@ static const char *g_bg_defaults[4] = { BG1, BG2, BG3, BG4 };
 static const char *g_fg_defaults[5] = { FG_DIS, FG_KER, FG_UPT, FG_MEM, FG_PIPE };
 static size_t g_entropy_current = 0;
 static char g_color_config_path[512];
+static int g_fast_mode = 0;
+static int g_net_stats_enabled = 1;
+static int g_allow_any_variant = 0;
 
 static const char *bg_code(int idx) {
     if (idx < 0 || idx >= 4) return "";
@@ -109,6 +112,12 @@ static const char *fg_code(int idx) {
 
 static int readable_png(const char *path);
 static void read_ip_addr(char *out, size_t out_sz);
+static void read_ip4(char *out, size_t out_sz);
+static void read_ip6(char *out, size_t out_sz);
+static void read_public_ip(int use_v6, char *out, size_t out_sz);
+static void read_dns_servers(char *out, size_t out_sz);
+static void read_ntp_status(char *out, size_t out_sz);
+static void read_fs_usage(char *out, size_t out_sz);
 static void read_disk_usage(char *out, size_t out_sz);
 static void read_open_ports(char *out, size_t out_sz);
 
@@ -380,12 +389,15 @@ typedef struct {
 
 typedef struct {
     int net_images;
-    int fetch_count;
-    int fetch_max;
-    char fetch_source[32];
-    char local_dir[512];
-    int stats_count;
-    char stats_keys[MAX_STATS][32];
+	int fetch_count;
+	int fetch_max;
+	char fetch_source[32];
+	char local_dir[512];
+	int stats_count;
+	char stats_keys[MAX_STATS][32];
+	char image_url[512];
+	int fast;
+	int net_stats;
 } AppConfig;
 
 static const char *default_variant_dir(char *buf, size_t buf_size);
@@ -783,7 +795,7 @@ download_url(const char *url, MemBuf *out)
 {
 	CURL *curl;
 	CURLcode rc;
-	long timeout = 15L;
+	long timeout = 2L;
 
 	curl = curl_easy_init();
 	if (!curl)
@@ -792,7 +804,7 @@ download_url(const char *url, MemBuf *out)
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "glitch-fetch/1.0");
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
-	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 1L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
 	rc = curl_easy_perform(curl);
@@ -923,6 +935,50 @@ save_variant_png(const unsigned char *rgba, int side, const char *dir,
 }
 
 static int
+download_image_from_url(const char *url, char *out_path, size_t out_sz)
+{
+#ifdef MINIMAL_BUILD
+	(void)url;
+	(void)out_path;
+	(void)out_sz;
+	return 0;
+#else
+	if (g_fast_mode) {
+		return 0;
+	}
+	MemBuf buf = {0};
+	unsigned char *rgba = NULL;
+	unsigned char *square = NULL;
+	int w = 0, h = 0, side = 0;
+	char dir_buf[512];
+	const char *dir = default_variant_dir(dir_buf, sizeof(dir_buf));
+	int ok;
+
+	if (!url || !*url || !dir)
+		return 0;
+
+	if (!download_url(url, &buf)) {
+		free(buf.data);
+		return 0;
+	}
+	ok = img_load_rgba_mem(buf.data, (int)buf.len, &rgba, &w, &h);
+	free(buf.data);
+	if (!ok || !rgba)
+		return 0;
+
+	ok = crop_square_rgba(rgba, w, h, &square, &side);
+	img_free(rgba);
+	if (!ok) {
+		return 0;
+	}
+
+	ok = save_variant_png(square, side, dir, out_path, out_sz);
+	free(square);
+	return ok;
+#endif
+}
+
+static int
 fetch_one_image(const AppConfig *cfg, const char *dir)
 {
 #ifdef MINIMAL_BUILD
@@ -1046,6 +1102,14 @@ static const char *label_for_key(const char *key) {
     if (strcmp(key, "user") == 0) return "usr";
     if (strcmp(key, "shell") == 0) return "shl";
     if (strcmp(key, "cpu") == 0) return "cpu";
+    if (strcmp(key, "ip") == 0) return "ip";
+    if (strcmp(key, "ip4") == 0 || strcmp(key, "ipv4") == 0) return "ip4";
+    if (strcmp(key, "ip6") == 0 || strcmp(key, "ipv6") == 0) return "ip6";
+    if (strcmp(key, "pub4") == 0) return "p4";
+    if (strcmp(key, "pub6") == 0) return "p6";
+    if (strcmp(key, "dns") == 0) return "dns";
+    if (strcmp(key, "ntp") == 0) return "ntp";
+    if (strcmp(key, "fs") == 0) return "fs";
     return key;
 }
 
@@ -1070,9 +1134,18 @@ static void build_stats(const AppConfig *cfg,
     }
 
     char ip_buf[64] = {0};
+    char ip4_buf[64] = {0};
+    char ip6_buf[64] = {0};
+    char pub4_buf[64] = {0};
+    char pub6_buf[64] = {0};
+    char dns_buf[128] = {0};
+    char ntp_buf[64] = {0};
+    char fs_buf[64] = {0};
     char disk_buf[64] = {0};
     char ports_buf[32] = {0};
     int ip_ready = 0, disk_ready = 0, ports_ready = 0;
+    int ip4_ready = 0, ip6_ready = 0, pub4_ready = 0, pub6_ready = 0;
+    int dns_ready = 0, ntp_ready = 0, fs_ready = 0;
 
     int count = 0;
     int max = (cfg && cfg->stats_count > 0) ? cfg->stats_count : 4;
@@ -1111,6 +1184,48 @@ static void build_stats(const AppConfig *cfg,
                 ip_ready = 1;
             }
             snprintf(st->value, sizeof(st->value), "%s", ip_buf);
+        } else if (strcmp(key, "ip4") == 0 || strcmp(key, "ipv4") == 0) {
+            if (!ip4_ready) {
+                read_ip4(ip4_buf, sizeof(ip4_buf));
+                ip4_ready = 1;
+            }
+            snprintf(st->value, sizeof(st->value), "%s", ip4_buf);
+        } else if (strcmp(key, "ip6") == 0 || strcmp(key, "ipv6") == 0) {
+            if (!ip6_ready) {
+                read_ip6(ip6_buf, sizeof(ip6_buf));
+                ip6_ready = 1;
+            }
+            snprintf(st->value, sizeof(st->value), "%s", ip6_buf);
+        } else if (strcmp(key, "pub4") == 0) {
+            if (!pub4_ready) {
+                read_public_ip(0, pub4_buf, sizeof(pub4_buf));
+                pub4_ready = 1;
+            }
+            snprintf(st->value, sizeof(st->value), "%s", pub4_buf);
+        } else if (strcmp(key, "pub6") == 0) {
+            if (!pub6_ready) {
+                read_public_ip(1, pub6_buf, sizeof(pub6_buf));
+                pub6_ready = 1;
+            }
+            snprintf(st->value, sizeof(st->value), "%s", pub6_buf);
+        } else if (strcmp(key, "dns") == 0) {
+            if (!dns_ready) {
+                read_dns_servers(dns_buf, sizeof(dns_buf));
+                dns_ready = 1;
+            }
+            snprintf(st->value, sizeof(st->value), "%s", dns_buf);
+        } else if (strcmp(key, "ntp") == 0) {
+            if (!ntp_ready) {
+                read_ntp_status(ntp_buf, sizeof(ntp_buf));
+                ntp_ready = 1;
+            }
+            snprintf(st->value, sizeof(st->value), "%s", ntp_buf);
+        } else if (strcmp(key, "fs") == 0) {
+            if (!fs_ready) {
+                read_fs_usage(fs_buf, sizeof(fs_buf));
+                fs_ready = 1;
+            }
+            snprintf(st->value, sizeof(st->value), "%s", fs_buf);
         } else if (strcmp(key, "disk") == 0) {
             if (!disk_ready) {
                 read_disk_usage(disk_buf, sizeof(disk_buf));
@@ -1169,22 +1284,37 @@ static void read_cpu_name(char *out, size_t out_sz) {
     snprintf(out, out_sz, "cpu");
 }
 
-static void
-read_ip_addr(char *out, size_t out_sz)
-{
-    FILE *fp;
-    char line[256];
+static void trim_newline(char *s) {
+    if (!s) return;
+    char *nl = strchr(s, '\n');
+    if (nl) *nl = '\0';
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t')) {
+        s[len - 1] = '\0';
+        len--;
+    }
+}
 
-    fp = popen("timeout 1 ip -4 addr show scope global 2>/dev/null", "r");
+static void read_ip_generic(int use_v6, char *out, size_t out_sz) {
+    FILE *fp = NULL;
+    char line[256];
+    const char *cmd_primary = use_v6 ?
+        "timeout 1 ip -6 addr show scope global 2>/dev/null" :
+        "timeout 1 ip -4 addr show scope global 2>/dev/null";
+    const char *cmd_fallback = use_v6 ?
+        "ip -6 addr show scope global 2>/dev/null" :
+        "ip -4 addr show scope global 2>/dev/null";
+    fp = popen(cmd_primary, "r");
     if (!fp)
-        fp = popen("ip -4 addr show scope global 2>/dev/null", "r");
+        fp = popen(cmd_fallback, "r");
     if (fp) {
         while (fgets(line, sizeof(line), fp)) {
-            char *p = strstr(line, "inet ");
+            const char *needle = use_v6 ? "inet6 " : "inet ";
+            char *p = strstr(line, needle);
             char *end;
             if (!p)
                 continue;
-            p += 5;
+            p += strlen(needle);
             while (*p == ' ')
                 p++;
             end = p;
@@ -1201,21 +1331,32 @@ read_ip_addr(char *out, size_t out_sz)
     }
 
     fp = popen("hostname -I 2>/dev/null", "r");
-    if (!fp) {
-        snprintf(out, out_sz, "n/a");
-        return;
+    if (fp) {
+        if (fgets(out, (int)out_sz, fp)) {
+            trim_newline(out);
+            /* pick first address matching family */
+            char *saveptr = NULL;
+            char *tok = strtok_r(out, " ", &saveptr);
+            while (tok) {
+                int has_colon = strchr(tok, ':') != NULL;
+                int has_dot = strchr(tok, '.') != NULL;
+                if ((use_v6 && has_colon) || (!use_v6 && has_dot)) {
+                    snprintf(out, out_sz, "%s", tok);
+                    pclose(fp);
+                    return;
+                }
+                tok = strtok_r(NULL, " ", &saveptr);
+            }
+        }
+        pclose(fp);
     }
-    if (!fgets(out, (int)out_sz, fp)) {
-        snprintf(out, out_sz, "n/a");
-    } else {
-        char *sp = strchr(out, ' ');
-        char *nl = strchr(out, '\n');
-        if (sp) *sp = '\0';
-        if (nl) *nl = '\0';
-        if (out[0] == '\0') snprintf(out, out_sz, "n/a");
-    }
-    pclose(fp);
+    snprintf(out, out_sz, "n/a");
 }
+
+static void read_ip4(char *out, size_t out_sz) { read_ip_generic(0, out, out_sz); }
+static void read_ip6(char *out, size_t out_sz) { read_ip_generic(1, out, out_sz); }
+
+static void read_ip_addr(char *out, size_t out_sz) { read_ip4(out, out_sz); }
 
 static void read_disk_usage(char *out, size_t out_sz) {
     struct statvfs vfs;
@@ -1227,6 +1368,213 @@ static void read_disk_usage(char *out, size_t out_sz) {
     double free = (double)vfs.f_bfree * vfs.f_frsize / (1024.0 * 1024.0 * 1024.0);
     double used = total - free;
     snprintf(out, out_sz, "%.1f/%.1f GiB", used, total);
+}
+
+static void read_fs_usage(char *out, size_t out_sz) {
+    char fs_type[64] = {0};
+    FILE *f = fopen("/proc/mounts", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            char dev[128], mnt[128], type[64];
+            if (sscanf(line, "%127s %127s %63s", dev, mnt, type) == 3) {
+                if (strcmp(mnt, "/") == 0) {
+                    snprintf(fs_type, sizeof(fs_type), "%s", type);
+                    break;
+                }
+            }
+        }
+        fclose(f);
+    }
+
+    struct statvfs vfs;
+    double pct = -1.0;
+    if (statvfs("/", &vfs) == 0 && vfs.f_blocks > 0) {
+        double total = (double)vfs.f_blocks * vfs.f_frsize;
+        double used = total - (double)vfs.f_bfree * vfs.f_frsize;
+        if (total > 0.0) {
+            pct = (used / total) * 100.0;
+        }
+    }
+
+    if (pct >= 0.0) {
+        snprintf(out, out_sz, "%s %d%%", fs_type[0] ? fs_type : "fs", (int)(pct + 0.5));
+    } else {
+        snprintf(out, out_sz, "%s n/a", fs_type[0] ? fs_type : "fs");
+    }
+}
+
+static void read_public_ip(int use_v6, char *out, size_t out_sz) {
+#ifdef MINIMAL_BUILD
+	(void)use_v6;
+	snprintf(out, out_sz, "n/a");
+	return;
+#else
+	if (g_fast_mode || !g_net_stats_enabled) {
+		snprintf(out, out_sz, "skip");
+		return;
+	}
+	const char *flag = use_v6 ? "-6" : "-4";
+    char cmd[256];
+    int ok = 0;
+
+    /* Prefer ARIN whoami */
+    snprintf(cmd, sizeof(cmd), "curl %s -m 1 -s https://whoami.arin.net/v1/ip 2>/dev/null", flag);
+    FILE *fp = popen(cmd, "r");
+    if (fp) {
+        if (fgets(out, (int)out_sz, fp)) {
+            trim_newline(out);
+            if (out[0] != '\0') {
+                ok = 1;
+            }
+        }
+        pclose(fp);
+    }
+
+    /* Fallback to ifconfig.co */
+    if (!ok) {
+        snprintf(cmd, sizeof(cmd), "curl %s -m 1 -s https://ifconfig.co 2>/dev/null", flag);
+        fp = popen(cmd, "r");
+        if (fp) {
+            if (fgets(out, (int)out_sz, fp)) {
+                trim_newline(out);
+                if (out[0] != '\0') {
+                    ok = 1;
+                }
+            }
+            pclose(fp);
+        }
+    }
+
+    if (!ok) {
+        snprintf(out, out_sz, "n/a");
+    }
+#endif
+}
+
+static void read_dns_servers(char *out, size_t out_sz) {
+    if (g_fast_mode || !g_net_stats_enabled) {
+        snprintf(out, out_sz, "skip");
+        return;
+    }
+
+    /* Prefer systemd-resolved if present */
+    FILE *fp = popen("resolvectl dns 2>/dev/null | awk '{for(i=2;i<=NF;i++)print $i}'", "r");
+    char line[256];
+    char buf[128] = {0};
+    size_t pos = 0;
+    int count = 0;
+    if (fp) {
+        while (fgets(line, sizeof(line), fp)) {
+            trim_newline(line);
+            if (line[0] == '\0')
+                continue;
+            if (count > 0 && pos < sizeof(buf) - 1) {
+                buf[pos++] = ',';
+            }
+            int n = snprintf(buf + pos, sizeof(buf) - pos, "%s", line);
+            if (n > 0) pos += (size_t)n;
+            count++;
+            if (count >= 2) break;
+        }
+        pclose(fp);
+    }
+    if (count == 0) {
+        /* Fallback: parse resolv.conf */
+        FILE *f = fopen("/etc/resolv.conf", "r");
+        if (f) {
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "nameserver", 10) != 0)
+                    continue;
+                char *p = line + 10;
+                while (*p == ' ' || *p == '\t')
+                    p++;
+                trim_newline(p);
+                if (*p == '\0')
+                    continue;
+                if (count > 0 && pos < sizeof(buf) - 1) {
+                    buf[pos++] = ',';
+                }
+                int n = snprintf(buf + pos, sizeof(buf) - pos, "%s", p);
+                if (n > 0) pos += (size_t)n;
+                count++;
+                if (count >= 2) break; /* keep it short */
+            }
+            fclose(f);
+        }
+    }
+    if (count == 0) {
+        snprintf(out, out_sz, "n/a");
+    } else {
+        snprintf(out, out_sz, "%s", buf);
+    }
+}
+
+static void read_ntp_status(char *out, size_t out_sz) {
+    if (g_fast_mode || !g_net_stats_enabled) {
+        snprintf(out, out_sz, "skip");
+        return;
+    }
+
+    FILE *fp = popen("chronyc tracking 2>/dev/null", "r");
+    char line[256];
+    int synced = -1;
+    char ntp[64] = {0};
+    if (fp) {
+        while (fgets(line, sizeof(line), fp)) {
+            if (strncmp(line, "Reference ID", 12) == 0) {
+                synced = 1;
+                snprintf(ntp, sizeof(ntp), "chrony");
+                break;
+            }
+            if (strstr(line, "System time") || strstr(line, "Last offset")) {
+                synced = 1;
+            }
+        }
+        pclose(fp);
+    }
+    if (synced == -1) {
+        fp = popen("ntpq -pn 2>/dev/null", "r");
+        if (fp) {
+            while (fgets(line, sizeof(line), fp)) {
+                if (line[0] == '*') {
+                    synced = 1;
+                    snprintf(ntp, sizeof(ntp), "ntpd");
+                    break;
+                }
+            }
+            pclose(fp);
+        }
+    }
+    if (synced == -1) {
+        fp = popen("timedatectl show -p NTP -p NTPSynchronized 2>/dev/null", "r");
+        if (fp) {
+            while (fgets(line, sizeof(line), fp)) {
+                if (strncmp(line, "NTP=", 4) == 0) {
+                    char *v = line + 4;
+                    trim_newline(v);
+                    strncpy(ntp, v, sizeof(ntp) - 1);
+                    ntp[sizeof(ntp) - 1] = '\0';
+                } else if (strncmp(line, "NTPSynchronized=", 16) == 0) {
+                    const char *v = line + 16;
+                    if (strncmp(v, "yes", 3) == 0 || strncmp(v, "true", 4) == 0)
+                        synced = 1;
+                    else if (strncmp(v, "no", 2) == 0 || strncmp(v, "false", 5) == 0)
+                        synced = 0;
+                }
+            }
+            pclose(fp);
+        }
+    }
+    if (ntp[0] == '\0' && synced == -1) {
+        snprintf(out, out_sz, "n/a");
+    } else if (synced == 1) {
+        snprintf(out, out_sz, "on (sync)");
+    } else if (synced == 0) {
+        snprintf(out, out_sz, "on (unsynced)");
+    } else {
+        snprintf(out, out_sz, "%s", ntp[0] ? ntp : "n/a");
+    }
 }
 
 static void
@@ -2099,10 +2447,14 @@ static void set_default_config(AppConfig *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->net_images = 1;
     cfg->fetch_count = 2;
-    cfg->fetch_max = 50;
-    snprintf(cfg->fetch_source, sizeof(cfg->fetch_source), "picsum");
-    cfg->stats_count = 4;
-    snprintf(cfg->stats_keys[0], sizeof(cfg->stats_keys[0]), "distro");
+	cfg->fetch_max = 50;
+	snprintf(cfg->fetch_source, sizeof(cfg->fetch_source), "picsum");
+	cfg->stats_count = 4;
+	cfg->image_url[0] = '\0';
+	cfg->fast = 0;
+	cfg->net_stats = 1;
+	g_allow_any_variant = 0;
+	snprintf(cfg->stats_keys[0], sizeof(cfg->stats_keys[0]), "distro");
     snprintf(cfg->stats_keys[1], sizeof(cfg->stats_keys[1]), "kernel");
     snprintf(cfg->stats_keys[2], sizeof(cfg->stats_keys[2]), "uptime");
     snprintf(cfg->stats_keys[3], sizeof(cfg->stats_keys[3]), "mem");
@@ -2148,9 +2500,15 @@ static void load_app_config(AppConfig *cfg) {
             if (*val) {
                 snprintf(g_color_config_path, sizeof(g_color_config_path), "%s", val);
             }
-        } else if (strcmp(key, "STATS") == 0) {
-            int count = 0;
-            char *tok = strtok(val, ",");
+		} else if (strcmp(key, "IMAGE_URL") == 0) {
+			snprintf(cfg->image_url, sizeof(cfg->image_url), "%s", val);
+		} else if (strcmp(key, "FAST") == 0) {
+			cfg->fast = atoi(val) != 0;
+		} else if (strcmp(key, "NET_STATS") == 0) {
+			cfg->net_stats = atoi(val) != 0;
+		} else if (strcmp(key, "STATS") == 0) {
+			int count = 0;
+			char *tok = strtok(val, ",");
             while (tok && count < MAX_STATS) {
                 while (*tok == ' ' || *tok == '\t') tok++;
                 if (*tok) {
@@ -2168,6 +2526,10 @@ static void load_app_config(AppConfig *cfg) {
 
     if (cfg->local_dir[0]) {
         setenv("GLITCH_VARIANT_DIR", cfg->local_dir, 1);
+        g_allow_any_variant = 1;
+    }
+    if (cfg->net_images == 0) {
+        g_allow_any_variant = 1;
     }
 }
 
@@ -2185,12 +2547,12 @@ static const char *default_variant_dir(char *buf, size_t buf_size) {
     return buf;
 }
 
-static int variant_exists(const char *dir, const char *noise_name) {
-    if (!dir || !noise_name) return 0;
-
-    char path[1024];
-    snprintf(path, sizeof(path), "%s/%s.png", dir, noise_name);
-    return access(path, R_OK) == 0 && readable_png(path);
+static int is_png_name(const char *name) {
+    if (!name) return 0;
+    size_t len = strlen(name);
+    if (len < 5) return 0;
+    const char *ext = name + len - 4;
+    return strcasecmp(ext, ".png") == 0;
 }
 
 /* Pick a variant (noise + matching PNG) from ~/.config/glitch/variants.
@@ -2207,34 +2569,82 @@ static int select_variant_image(int noise_locked, char *img_buf, size_t buf_size
     const char *forced_variant = getenv("GLITCH_VARIANT");
     const char *forced_noise   = getenv("GLITCH_NOISE");
 
-    if (forced_variant && *forced_variant && variant_exists(variant_dir, forced_variant)) {
-        snprintf(img_buf, buf_size, "%s/%s.png", variant_dir, forced_variant);
-        setenv("GLITCH_NOISE", forced_variant, 1);
-        return 1;
-    }
+    /* Collect candidates in one pass */
+    struct Cand {
+        char name[256];
+        char path[1024];
+    };
+    struct Cand noise_matches[128];
+    struct Cand any_matches[256];
+    int noise_count = 0, any_count = 0;
 
-    if (forced_noise && *forced_noise && noise_locked && variant_exists(variant_dir, forced_noise)) {
-        snprintf(img_buf, buf_size, "%s/%s.png", variant_dir, forced_noise);
-        return 1;
-    }
-
-    const char *candidates[64];
-    int count = 0;
-
-    for (int i = 0; noise_sets[i].name != NULL && count < (int)(sizeof(candidates) / sizeof(candidates[0])); ++i) {
-        if (variant_exists(variant_dir, noise_sets[i].name)) {
-            candidates[count++] = noise_sets[i].name;
+    DIR *d = opendir(variant_dir);
+    if (!d) return 0;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (!is_png_name(ent->d_name)) continue;
+        if (ent->d_name[0] == '.') continue;
+        if (any_count < (int)(sizeof(any_matches) / sizeof(any_matches[0]))) {
+            snprintf(any_matches[any_count].name, sizeof(any_matches[any_count].name), "%s", ent->d_name);
+            snprintf(any_matches[any_count].path, sizeof(any_matches[any_count].path), "%s/%s", variant_dir, ent->d_name);
+            any_count++;
+        }
+        char base[256] = {0};
+        snprintf(base, sizeof(base), "%s", ent->d_name);
+        char *dot = strrchr(base, '.');
+        if (dot) *dot = '\0';
+        if (*base) {
+            for (int i = 0; noise_sets[i].name != NULL; ++i) {
+                if (strcmp(base, noise_sets[i].name) == 0) {
+                    if (noise_count < (int)(sizeof(noise_matches) / sizeof(noise_matches[0]))) {
+                        snprintf(noise_matches[noise_count].name, sizeof(noise_matches[noise_count].name), "%s", base);
+                        snprintf(noise_matches[noise_count].path, sizeof(noise_matches[noise_count].path), "%s/%s", variant_dir, ent->d_name);
+                        noise_count++;
+                    }
+                    break;
+                }
+            }
+            if (forced_variant && *forced_variant && strcmp(base, forced_variant) == 0) {
+                snprintf(img_buf, buf_size, "%s/%s", variant_dir, ent->d_name);
+                setenv("GLITCH_NOISE", base, 1);
+                setenv("GLITCH_VARIANT", base, 1);
+                closedir(d);
+                return 1;
+            }
+            if (forced_noise && *forced_noise && strcmp(base, forced_noise) == 0 && noise_locked) {
+                snprintf(img_buf, buf_size, "%s/%s", variant_dir, ent->d_name);
+                closedir(d);
+                return 1;
+            }
         }
     }
+    closedir(d);
 
-    if (count == 0 || noise_locked) {
-        return 0;
+    if (noise_count > 0 && !noise_locked) {
+        int idx = rng_range(noise_count);
+        snprintf(img_buf, buf_size, "%s", noise_matches[idx].path);
+        setenv("GLITCH_NOISE", noise_matches[idx].name, 1);
+        setenv("GLITCH_VARIANT", noise_matches[idx].name, 1);
+        return 1;
     }
 
-    const char *choice = candidates[rng_range(count)];
-    snprintf(img_buf, buf_size, "%s/%s.png", variant_dir, choice);
-    setenv("GLITCH_NOISE", choice, 1);
-    return 1;
+    if (g_allow_any_variant && any_count > 0) {
+        int idx = rng_range(any_count);
+        snprintf(img_buf, buf_size, "%s", any_matches[idx].path);
+        if (!noise_locked) {
+            char base[256] = {0};
+            snprintf(base, sizeof(base), "%s", any_matches[idx].name);
+            char *dot = strrchr(base, '.');
+            if (dot) *dot = '\0';
+            if (*base) {
+                setenv("GLITCH_NOISE", base, 1);
+                setenv("GLITCH_VARIANT", base, 1);
+            }
+        }
+        return 1;
+    }
+
+    return 0;
 }
 
 static void init_noise_mode(void) {
@@ -2829,12 +3239,15 @@ static void print_frame(int frame,
 
 
 int main(int argc, char **argv) {
-    int once = 0;
+	int once = 0;
     useconds_t delay = 50000; /* default 50ms */
     int noise_locked = 0;
-    unsigned long duration_ms = 1500; /* default run ~1.5 seconds */
-    AppConfig cfg;
-    load_app_config(&cfg);
+    unsigned long duration_ms = 1800; /* default run ~1.8 seconds */
+	const char *cli_image_url = NULL;
+	int cli_fast = 0;
+	int cli_no_net_stats = 0;
+	AppConfig cfg;
+	load_app_config(&cfg);
 
     uint64_t seed = ((uint64_t)time(NULL) << 32) ^ (uint64_t)getpid();
     get_random_bytes(&seed, sizeof(seed));
@@ -2937,18 +3350,58 @@ int main(int argc, char **argv) {
             noise_locked = 1;
         } else if (strcmp(argv[i], "--char") == 0 && i + 1 < argc) {
             setenv("GLITCH_CHAR", argv[++i], 1);
-        }
-    }
+		} else if (strcmp(argv[i], "--image-url") == 0 && i + 1 < argc) {
+			cli_image_url = argv[++i];
+		} else if (strcmp(argv[i], "--fast") == 0) {
+			cli_fast = 1;
+		} else if (strcmp(argv[i], "--no-net-stats") == 0) {
+			cli_no_net_stats = 1;
+		}
+	}
+
+	/* fast mode from env/config/cli */
+	if (cfg.fast) g_fast_mode = 1;
+    const char *env_fast = getenv("GLITCH_FAST");
+	if (env_fast && *env_fast && atoi(env_fast) != 0) g_fast_mode = 1;
+	if (cli_fast) g_fast_mode = 1;
+
+	/* net stats toggle */
+	g_net_stats_enabled = cfg.net_stats;
+	const char *env_net_stats = getenv("GLITCH_NET_STATS");
+	if (env_net_stats && *env_net_stats) {
+		g_net_stats_enabled = atoi(env_net_stats) != 0;
+	}
+	if (cli_no_net_stats) {
+		g_net_stats_enabled = 0;
+	}
 
     /* refresh variants if enabled */
-    run_fetcher(&cfg, 0);
+    if (!g_fast_mode) {
+        run_fetcher(&cfg, 0);
+    }
+
+    /* optional: download a specific image from URL (CLI/env/config) */
+    char url_img_path[1024] = {0};
+    const char *env_image_url = getenv("GLITCH_IMAGE_URL");
+    const char *image_url = cli_image_url ? cli_image_url
+                           : (env_image_url && *env_image_url) ? env_image_url
+                           : (cfg.image_url[0] ? cfg.image_url : NULL);
+    if (image_url && *image_url && !g_fast_mode) {
+        if (!download_image_from_url(image_url, url_img_path, sizeof(url_img_path))) {
+            if (getenv("GLITCH_DEBUG")) {
+                fprintf(stderr, "[glitch] failed to fetch image from %s\n", image_url);
+            }
+        }
+    }
 
     /* Resolve image path (optional) */
     char img_buf[1024];
     const char *img_path = NULL;
     int variant_has_image = select_variant_image(noise_locked, img_buf, sizeof(img_buf));
 
-    if (variant_has_image) {
+    if (url_img_path[0]) {
+        img_path = url_img_path;
+    } else if (variant_has_image) {
         img_path = img_buf;
         noise_locked = 1; /* variant sets GLITCH_NOISE */
     } else if (chosen_variant_path[0]) {
@@ -2982,73 +3435,70 @@ int main(int argc, char **argv) {
 
     /* Gather system info once per frame loop */
     struct utsname un;
-    struct sysinfo info;
-
+    if (uname(&un) != 0) {
+        memset(&un, 0, sizeof(un));
+        strcpy(un.sysname, "unknown");
+        strcpy(un.release, "unknown");
+    }
     char distro[128]    = {0};
     char kernel[128]    = {0};
+    char cpu_name[128]  = {0};
     char uptime_buf[64] = {0};
     char mem_buf[64]    = {0};
-    char cpu_name[128]  = {0};
-    read_cpu_name(cpu_name, sizeof(cpu_name));
     StatEntry stats[MAX_STATS];
+    struct sysinfo info;
     int stats_count = 0;
+
+    read_cpu_name(cpu_name, sizeof(cpu_name));
+    /* distro (once) */
+    FILE *osrelease = fopen("/etc/os-release", "r");
+    if (!osrelease) {
+        snprintf(distro, sizeof(distro), "%s", un.sysname);
+    } else {
+        char line[256];
+        int set = 0;
+        while (fgets(line, sizeof(line), osrelease)) {
+            if (strncmp(line, "PRETTY_NAME=", 12) == 0) {
+                char *v = strchr(line, '=');
+                if (v) {
+                    v++;
+                    if (*v == '\"') v++;
+                    char *end = strrchr(v, '\"');
+                    if (end) *end = '\0';
+                    char *nl = strchr(v, '\n');
+                    if (nl) *nl = '\0';
+                    snprintf(distro, sizeof(distro), "%s", v);
+                    set = 1;
+                }
+                break;
+            }
+            if (strncmp(line, "ID=", 3) == 0 && !set) {
+                char *v = strchr(line, '=');
+                if (v) {
+                    v++;
+                    char *nl = strchr(v, '\n');
+                    if (nl) *nl = '\0';
+                    snprintf(distro, sizeof(distro), "%s", v);
+                    set = 1;
+                }
+                break;
+            }
+        }
+        fclose(osrelease);
+        if (!set) {
+            snprintf(distro, sizeof(distro), "%s", un.sysname);
+        }
+    }
+    snprintf(kernel, sizeof(kernel), "%s", un.release);
 
     /* hide cursor */
     printf("\e[?25l");
 
+    if (sysinfo(&info) != 0) {
+        memset(&info, 0, sizeof(info));
+    }
+
     if (once) {
-        if (uname(&un) != 0) {
-            memset(&un, 0, sizeof(un));
-            strcpy(un.sysname, "unknown");
-            strcpy(un.release, "unknown");
-        }
-
-        if (sysinfo(&info) != 0) {
-            memset(&info, 0, sizeof(info));
-        }
-
-        /* distro */
-        FILE *osrelease = fopen("/etc/os-release", "r");
-        if (!osrelease) {
-            snprintf(distro, sizeof(distro), "%s", un.sysname);
-        } else {
-            char line[256];
-            int set = 0;
-            while (fgets(line, sizeof(line), osrelease)) {
-                if (strncmp(line, "PRETTY_NAME=", 12) == 0) {
-                    char *v = strchr(line, '=');
-                    if (v) {
-                        v++;
-                        if (*v == '\"') v++;
-                        char *end = strrchr(v, '\"');
-                        if (end) *end = '\0';
-                        char *nl = strchr(v, '\n');
-                        if (nl) *nl = '\0';
-                        snprintf(distro, sizeof(distro), "%s", v);
-                        set = 1;
-                    }
-                    break;
-                }
-                if (strncmp(line, "ID=", 3) == 0 && !set) {
-                    char *v = strchr(line, '=');
-                    if (v) {
-                        v++;
-                        char *nl = strchr(v, '\n');
-                        if (nl) *nl = '\0';
-                        snprintf(distro, sizeof(distro), "%s", v);
-                        set = 1;
-                    }
-                    break;
-                }
-            }
-            fclose(osrelease);
-            if (!set) {
-                snprintf(distro, sizeof(distro), "%s", un.sysname);
-            }
-        }
-
-        snprintf(kernel, sizeof(kernel), "%s", un.release);
-
         long uptime = info.uptime;
         int days    = uptime / 86400;
         int hours   = (uptime % 86400) / 3600;
@@ -3090,58 +3540,11 @@ int main(int argc, char **argv) {
     clock_gettime(CLOCK_MONOTONIC, &start_ts);
 
     while (1) {
-        if (uname(&un) != 0) {
-            memset(&un, 0, sizeof(un));
-            strcpy(un.sysname, "unknown");
-            strcpy(un.release, "unknown");
-        }
-
         if (sysinfo(&info) != 0) {
             memset(&info, 0, sizeof(info));
         }
 
         /* distro */
-        FILE *osrelease = fopen("/etc/os-release", "r");
-        if (!osrelease) {
-            snprintf(distro, sizeof(distro), "%s", un.sysname);
-        } else {
-            char line[256];
-            int set = 0;
-            while (fgets(line, sizeof(line), osrelease)) {
-                if (strncmp(line, "PRETTY_NAME=", 12) == 0) {
-                    char *v = strchr(line, '=');
-                    if (v) {
-                        v++;
-                        if (*v == '\"') v++;
-                        char *end = strrchr(v, '\"');
-                        if (end) *end = '\0';
-                        char *nl = strchr(v, '\n');
-                        if (nl) *nl = '\0';
-                        snprintf(distro, sizeof(distro), "%s", v);
-                        set = 1;
-                    }
-                    break;
-                }
-                if (strncmp(line, "ID=", 3) == 0 && !set) {
-                    char *v = strchr(line, '=');
-                    if (v) {
-                        v++;
-                        char *nl = strchr(v, '\n');
-                        if (nl) *nl = '\0';
-                        snprintf(distro, sizeof(distro), "%s", v);
-                        set = 1;
-                    }
-                    break;
-                }
-            }
-            fclose(osrelease);
-            if (!set) {
-                snprintf(distro, sizeof(distro), "%s", un.sysname);
-            }
-        }
-
-        snprintf(kernel, sizeof(kernel), "%s", un.release);
-
         long uptime = info.uptime;
         int days    = uptime / 86400;
         int hours   = (uptime % 86400) / 3600;

@@ -22,4 +22,4 @@
 
 - Rebuild with new shape or colors after editing config:
 
-`./install.sh`
+`./scripts/install.sh`

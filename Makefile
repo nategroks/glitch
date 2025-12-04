@@ -3,23 +3,34 @@ CFLAGS?=-O2 -Wall
 LDFLAGS?=
 LIBS=-lpng -lz -lcurl
 
-.PHONY: glitch clean install
+SRC_DIR=src
+OBJ_DIR=build
+BIN=glitch
 
-OBJS = glitch.o img.o
+.DEFAULT_GOAL := $(BIN)
 
-glitch: $(OBJS) colors.h shape.h
-	$(CC) $(CFLAGS) -o glitch $(OBJS) -lm $(LIBS) $(LDFLAGS)
+INCLUDES=-I$(SRC_DIR)
+SRCS=$(SRC_DIR)/glitch.c $(SRC_DIR)/img.c
+OBJS=$(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
-glitch.o: glitch.c colors.h shape.h img.h
-img.o: img.c img.h
+.PHONY: clean lean minimal
+
+$(BIN): $(OBJS) $(SRC_DIR)/colors.h $(SRC_DIR)/shape.h
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $(OBJS) -lm $(LIBS) $(LDFLAGS)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/img.h $(SRC_DIR)/xxhash.h $(SRC_DIR)/colors.h $(SRC_DIR)/shape.h | $(OBJ_DIR)
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 lean: CFLAGS+=-O2 -pipe -march=native -fno-plt -Wall
 lean: LDFLAGS+=-s
-lean: glitch
+lean: $(BIN)
 
 minimal: CFLAGS+=-DMINIMAL_BUILD -Wall
 minimal: LIBS=-lpng -lz
-minimal: glitch
+minimal: $(BIN)
 
 clean:
-	rm -f glitch $(OBJS) colors.h shape.h
+	rm -f $(BIN) $(OBJS) $(SRC_DIR)/colors.h $(SRC_DIR)/shape.h src/*.o glitch.o img.o
