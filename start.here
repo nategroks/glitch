@@ -3,53 +3,54 @@ glitch quickstart
 
 Repo layout
 - config/: palette presets for `~/.config/glitch/color.config`.
+- scripts/: install.sh (build + config + PATH), path.sh (re-add PATH), setup-tldr.sh (install TLDR page), fetch_variants.py (download/crop PNGs), spritegen.py (turn a small PNG into a `shape.h`).
 - src/: C sources plus generated `colors.h` and `shape.h`.
-- scripts/: install, PATH helper, TLDR setup, and tooling.
-- variants/, noise/, encryption/: stash example assets or work-in-progress files here.
+- docs/: generated TLDR entry; variants/, noise/, encryption/: stash example assets or WIP files here.
+
+Dependencies
+- Required: `cc`, `make`, `libpng`, `zlib`.
+- Network fetcher: `curl` (skip it if you plan to use `make minimal` or set `NET_IMAGES=0`).
+- Palette/image tooling: `python3` + `python3 -m pip install pillow` for auto palette sampling, `scripts/fetch_variants.py`, and `scripts/spritegen.py`.
+- TLDR helper (optional): `pip install tldr` or `cargo install tealdeer` so `tldr glitch` works.
 
 1) Install/build once
-- Prereqs: `cc`, `make`, `libpng`, `zlib`, `curl` (skip curl for minimal). Optional: Python 3 + Pillow if you want auto palette sampling from images.
-- From the repo root: `./scripts/install.sh`
-  - Creates `~/.config/glitch/` with `glitch.config`, `color.config`, `shape.config`, and `variants/`.
-  - Builds the binary and installs the man page.
-  - If Python is missing, it will fall back to a baked palette; you can swap in a template below.
-- Adds this repo to your PATH in `~/.bashrc` (run `source ~/.bashrc` after install). `./scripts/path.sh` is still available if you need to re-add it manually.
+- From repo root: `./scripts/install.sh`
+  - Creates `~/.config/glitch/` with `glitch.config`, `color.config`, `shape.config`, and `variants/README.txt`.
+  - Samples a palette from your PNGs when Pillow is available; otherwise writes a baked palette (`GLITCH_PALETTE=miami|sunset|neon|random`, or `GLITCH_PALETTE=auto` to force sampling).
+  - Generates `src/colors.h` and `src/shape.h` for the chosen `SHAPE` (current shapes: `gentoo`, `arch`; unknown names fall back to gentoo).
+  - Builds the binary via `make glitch` (use `make lean` for native tuning or `NET_IMAGES=0 ./scripts/install.sh` / `make minimal` for text-only/offline).
+  - Installs the man page to `~/.local/share/man/man1` and adds the repo to PATH in `~/.bashrc`; run `source ~/.bashrc` after.
+  - Writes `docs/tldr-glitch.md` and runs `scripts/setup-tldr.sh` so `tldr glitch`/`tealdeer glitch` resolve when a client is installed.
 
-2) Add your own pictures (Kitty overlays / palette sampling)
-- Drop square PNGs into `~/.config/glitch/variants/`. Name them after a noise mode (e.g., `sunset.png`, `sword.png`, `storm.png`). The name drives both the overlay and `GLITCH_NOISE`.
-- To force a specific image/noise: `GLITCH_VARIANT=sunset ./glitch` (also sets `GLITCH_NOISE=sunset`).
-- To keep your own directory separate, set `LOCAL_IMAGES_DIR=/path/to/your/pngs` inside `~/.config/glitch/glitch.config` (or export `GLITCH_VARIANT_DIR`), then rerun `./scripts/install.sh`.
-- If `NET_IMAGES=0` or `LOCAL_IMAGES_DIR` is set, any `*.png` in that directory will be used (even if the filename doesn’t match a noise mode); a random one is picked if none match.
+2) Configuration + customization
+- Config lives in `~/.config/glitch/`.
+  - `glitch.config`: knobs for `NET_IMAGES` (1/0), `FETCH_SOURCE` (picsum|unsplash|reddit), `FETCH_COUNT`, `FETCH_MAX`, `LOCAL_IMAGES_DIR` or `GLITCH_VARIANT_DIR`, `IMAGE_URL`, `FAST`, `NET_STATS`, `STATS` (any 14 of distro,kernel,uptime,mem,host,user,shell,cpu,ip,ip4,ip6,pub4,pub6,dns,ntp,fs,disk,ports,entropy).
+  - `color.config`: set `BG1..BG4`, `FG_DIS`, `FG_KER`, `FG_UPT`, `FG_MEM`, `FG_PIPE`; rerun `./scripts/install.sh` after edits. Palette templates: `config/color.config.nord`, `.dracula`, `.high-contrast`, `.gruvbox`, `.grayscale`.
+  - `shape.config`: set `SHAPE=gentoo|arch`; rerun `./scripts/install.sh`. For custom art, run `python3 scripts/spritegen.py my.png myshape > src/shape.h && ./scripts/install.sh`.
+  - `variants/`: drop square PNGs named after noise modes (e.g., `sunset.png`, `sword.png`, `storm.png`). Lock one with `GLITCH_VARIANT=name` (also sets `GLITCH_NOISE=name`). Set `NET_IMAGES=0` to stay offline. `LOCAL_IMAGES_DIR` lets you point to another folder without moving files.
+- Palette without Python: `GLITCH_PALETTE=miami|sunset|neon|random ./scripts/install.sh` to bake colors; use `GLITCH_PALETTE=auto` to force image sampling when Pillow exists.
+- Stats/perf knobs at runtime: `GLITCH_SPEED=120`, `GLITCH_DURATION_MS=4000`, `GLITCH_NOISE=diamond`, `GLITCH_IMAGE_URL=https://...`, `GLITCH_FAST=1`, `GLITCH_NET_STATS=0`, `./glitch --once`, `./glitch --no-net-stats`.
 
-3) Apply your own hex palette
-- Edit `~/.config/glitch/color.config` directly (keys: BG1..BG4, FG_DIS, FG_KER, FG_UPT, FG_MEM, FG_PIPE), then rerun `./scripts/install.sh` to regenerate `colors.h`.
-- Use a template from `config/`:
-  - Nord: `cp config/color.config.nord ~/.config/glitch/color.config`
-  - Dracula: `cp config/color.config.dracula ~/.config/glitch/color.config`
-  - High contrast: `cp config/color.config.high-contrast ~/.config/glitch/color.config`
-  - Gruvbox: `cp config/color.config.gruvbox ~/.config/glitch/color.config`
-  - Grayscale: `cp config/color.config.grayscale ~/.config/glitch/color.config`
-  - After copying, run `./scripts/install.sh` to rebuild with that palette.
-- Alternately, bake in a palette without Python by setting `GLITCH_PALETTE=miami|sunset|neon|random` before `./scripts/install.sh`.
+3) Helper scripts
+- Refresh PATH only: `./scripts/path.sh`.
+- Install TLDR entry manually: `./scripts/setup-tldr.sh --page docs/tldr-glitch.md`.
+- Fetch images yourself: `python3 scripts/fetch_variants.py --source reddit --count 6` (or `--source picsum|unsplash`, add `--circle-mask` to round, needs Pillow).
+- Convert an 8-bit style PNG into a shape: `python3 scripts/spritegen.py input.png myshape > src/shape.h && ./scripts/install.sh`.
 
-4) Turn off web downloads for PNGs
-- Set `NET_IMAGES=0` in `~/.config/glitch/glitch.config` (or export `NET_IMAGES=0`) to disable all network fetching.
-- For a text-only build, use `make minimal` (or run `./scripts/install.sh` after setting `NET_IMAGES=0` to keep configs in sync).
-
-5) TLDR page (tldr/tealdeer)
-- Install a client (`pip install tldr` or `cargo install tealdeer`).
-- Run `./scripts/setup-tldr.sh` to copy/symlink the `glitch` page into both python-tldr and tealdeer caches (survives `tldr --update`).
-- Then `tldr glitch` / `tealdeer glitch` should resolve.
-
-6) Extra stats + images
-- Available stat keys (set `STATS=` in `~/.config/glitch/glitch.config`): distro,kernel,uptime,mem,host,user,shell,cpu,ip,ip4,ip6,pub4,pub6,dns,ntp,fs,disk,ports,entropy (max 14).
-- Public IPs: use `pub4`/`pub6`; private IPs: `ip`/`ip4`/`ip6`; fs: `fs`; DNS: `dns`; NTP: `ntp`.
-- To force a specific online PNG (e.g., copied from lynx): set `IMAGE_URL=https://...` in `~/.config/glitch/glitch.config`, export `GLITCH_IMAGE_URL`, or run `./glitch --image-url URL`.
-- Fast mode: skip network stats/fetches with `FAST=1` in config, `GLITCH_FAST=1`, or `./glitch --fast`.
-- Skip network stats only (keep other fetches): set `NET_STATS=0` in config, `GLITCH_NET_STATS=0`, or use `./glitch --no-net-stats`.
-
-7) Run
+4) Run
 - Default: `./glitch`
 - Single frame: `./glitch --once`
-- Lock a shape/noise: `GLITCH_NOISE=diamond ./glitch`
+- Lock a variant/noise: `GLITCH_NOISE=diamond ./glitch`
 - Speed/duration: `GLITCH_SPEED=120 GLITCH_DURATION_MS=4000 ./glitch`
+- Refresh images only (no render): `./glitch --fetch-only`
+
+Bashrc quick tutorial + best practices
+- Backup first: `cp ~/.bashrc ~/.bashrc.bak`.
+- Edit: `$EDITOR ~/.bashrc` (or `nano ~/.bashrc`). Add exports/aliases near the bottom, e.g.:
+    export PATH="/home/gero/project/glitch:$PATH"
+    export GLITCH_VARIANT=sunset
+    alias glitchf="GLITCH_FAST=1 ./glitch"
+- Reload: `source ~/.bashrc` (or open a new shell) and verify with `echo $PATH`.
+- Keep it lean: avoid heavy logic; put big functions in a separate sourced file.
+- Prevent surprises: if you script non-interactive shells, keep `[[ $- != *i* ]] && return` near the top so automation isn’t slowed by prompts.
+- Comment sections and group related exports; avoid duplicate PATH entries by reusing the same `export PATH="...:$PATH"` block instead of appending in multiple spots.
