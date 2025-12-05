@@ -6,6 +6,7 @@ LIBS=-lpng -lz -lcurl
 SRC_DIR=src
 OBJ_DIR=build
 BIN=glitch
+GEN_ASSETS=scripts/gen-default-assets.sh
 
 .DEFAULT_GOAL := $(BIN)
 
@@ -17,6 +18,9 @@ OBJS=$(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 $(BIN): $(OBJS) $(SRC_DIR)/colors.h $(SRC_DIR)/shape.h
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $(OBJS) -lm $(LIBS) $(LDFLAGS)
+
+$(SRC_DIR)/colors.h $(SRC_DIR)/shape.h: $(GEN_ASSETS)
+	$(GEN_ASSETS)
 
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
