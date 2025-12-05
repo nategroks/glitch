@@ -1,0 +1,19 @@
+Source: glitch
+Section: utils
+Priority: optional
+Maintainer: Glitch Maintainers <maintainers@example.com>
+Build-Depends: debhelper-compat (= 13),
+               libpng-dev,
+               libcurl4-openssl-dev,
+               zlib1g-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/nate/glitch
+
+Package: glitch
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Animated vaporwave system information tool
+ glitch renders animated ASCII noise modes with system
+ information, optional Kitty image overlays, and built-in
+ entropy helpers.
